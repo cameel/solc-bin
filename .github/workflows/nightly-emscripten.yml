@@ -2,8 +2,9 @@ name: Emscripten nightly build + push to solc-bin
 
 on:
   schedule:
-    # Run once a day, at midnight
-    - cron: '0 0 * * *'
+    # TMP: For debugging only
+    # Run once every hour
+    - cron: '0 * * * *'
 
   # TMP: For debugging only
   push:
