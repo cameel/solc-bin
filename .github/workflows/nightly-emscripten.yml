@@ -5,6 +5,11 @@ on:
     # Run once a day, at midnight
     - cron: '0 0 * * *'
 
+  # TMP: For debugging only
+  push:
+    branches:
+      - gh-pages
+
 env:
   TARGET_BRANCH: gh-pages
   COMMITTER_NAME: emscripten nightly action
