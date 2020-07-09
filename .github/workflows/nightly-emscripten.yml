@@ -49,7 +49,6 @@ jobs:
 
           cd ../solc-bin/
           matching_nightlies_in_the_repo="$(
-            git ls-files "bin/soljson-v${solidity_version}-nightly.${last_commit_date}+commit.*.js";
             git ls-files "bin/soljson-v${solidity_version}-nightly.*+commit.${last_commit_hash}.js"
           )"
           nightly_version="v${solidity_version}-nightly.${last_commit_date}+commit.${last_commit_hash}"
