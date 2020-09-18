@@ -2,8 +2,8 @@ name: Emscripten nightly build + push to solc-bin
 
 on:
   schedule:
-    # Run once a day, at midnight
-    - cron: '0 0 * * *'
+    # Run on Monday, January 1st, i.e. almost never. The next valid date is in 2029.
+    - cron: '0 0 1 1 1'
 
 env:
   TARGET_BRANCH: gh-pages

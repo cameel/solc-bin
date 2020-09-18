@@ -1,14 +1,9 @@
 name: Mirror repository content to an S3 bucket
 
 on:
-  push:
-    branches:
-      - gh-pages
-
   schedule:
-    # Pushes to `gh-pages` done from other actions cannot trigger this action so we also want it to run
-    # on a schedule. Let's give the nightly job a 1h head-start and run every day at 1:00.
-    - cron: '0 1 * * *'
+    # Run on Monday, January 1st, i.e. almost never. The next valid date is in 2029.
+    - cron: '0 0 1 1 1'
 
 env:
   S3_BUCKET: solc-bin
