@@ -3,7 +3,7 @@ name: Mac OS build of solc
 on:
   push:
     branches:
-      - macos-build-0.5.0
+      - new-macos-build
 
 env:
   SOLIDITY_VERSION: 0.5.0
