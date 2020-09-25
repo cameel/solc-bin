@@ -3,7 +3,11 @@ name: MacOS build of solc
 on:
   schedule:
     # Run once per hour.
-    - cron: '0 * * * *'
+    - cron: '0/15 * * * *'
+
+  push:
+    branches:
+      - github-action-macosx-static-binaries
 
 env:
   MIN_SUPPORTED_SOLIDITY_VERSION: 0.4.0
