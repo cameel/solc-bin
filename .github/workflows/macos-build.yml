@@ -15,6 +15,7 @@ jobs:
     steps:
       - name: semver
         run: |
+          npm install --global semver
           semver
 
       - name: Check out Solidity
