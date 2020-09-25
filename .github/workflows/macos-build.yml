@@ -13,6 +13,10 @@ jobs:
     runs-on: macos-10.15
 
     steps:
+      - name: semver
+        run: |
+          semver
+
       - name: Check out Solidity
         uses: actions/checkout@v2
         with:
