@@ -1,0 +1,149 @@
+name: Mac OS build of solc
+
+on:
+  push:
+    branches:
+      - macos-build-0.5.0
+
+env:
+  SOLIDITY_VERSION: 0.5.0
+
+jobs:
+  build-macos-release:
+    runs-on: macos-10.15
+
+    steps:
+      - name: Check out Solidity
+        uses: actions/checkout@v2
+        with:
+          repository: 'ethereum/solidity'
+          ref: v${{ env.SOLIDITY_VERSION }}
+          path: solidity/
+
+      - name: Check out webthree-helpers for pre-0.4.0 solc
+        uses: actions/checkout@v2
+        with:
+          repository: 'ethereum/webthree-helpers'
+          # The last commit before all the content has been removed
+          ref: 7a580d70a94397e797621d02110018e045ccdab9
+          path: webthree-helpers/
+
+      - name: Remove the -Werror flag
+        run: |
+          cd solidity/
+          sed -i.bak '/^[[:blank:]]*add_compile_options(-Werror)[[:blank:]]*$/d' cmake/EthCompilerSettings.cmake
+
+      - name: Prepare version
+        run: |
+          cd solidity/
+          # TMP: Version parsing fails on MacOs because of grep
+          #if ! [ "$SOLIDITY_VERSION" = "$("scripts/get_version.sh")" ]; then
+          #  exit 1
+          #fi
+          last_commit_hash=$(git rev-parse --short=8 HEAD)
+          full_version="v${SOLIDITY_VERSION}+commit.${last_commit_hash}"
+
+          echo "::set-env name=FULL_VERSION::${full_version}"
+
+      - name: Install Aleth for IPC tests
+        run: |
+          mkdir cpp-ethereum/
+          cd cpp-ethereum/
+          curl -O -L https://github.com/ethereum/aleth/releases/download/v1.5.0/aleth-1.5.0-darwin-x86_64.tar.gz
+          tar --extract --file aleth-1.5.0-darwin-x86_64.tar.gz
+
+          cd ../solidity/
+          ln -s ../cpp-ethereum/bin/aleth eth
+
+      - name: Install Mac OS dependencies
+        run: |
+          cd solidity/
+          if [ -e .circleci/osx_install_dependencies.sh ]; then
+            .circleci/osx_install_dependencies.sh
+          else
+            brew unlink python
+
+            # For realpath on 0.5.10
+            brew install coreutils
+
+            # NOTE: Tests on solc < 0.6.0 won't pass with boost >= 1.71.0.
+            # The newest pre-1.73 boost in homebrew is 1.60.
+            # See https://github.com/ethereum/solidity/issues/6349#issuecomment-694823895
+            # TMP: boost 1.60 is disabled in brew
+            #brew install boost@1.60
+
+            # Boost 1.70.0
+            #curl --remote-name https://raw.githubusercontent.com/Homebrew/homebrew-core/5da5895add2f6b9320d654dd844d4827f6876c8b/Formula/boost.rb
+            # Boost 1.60.0
+            #curl --remote-name https://raw.githubusercontent.com/Homebrew/homebrew-core/e0ecc9519ca9c0491a3ec336985b93cf1705c9b4/Formula/boost.rb
+            # Boost 1.63.0
+            #curl --remote-name https://raw.githubusercontent.com/Homebrew/homebrew-core/be7a0f0ac45c03e453c7940df79ce2f608d0ebaf/Formula/boost.rb
+            # Boost 1.65.0
+            curl --remote-name https://raw.githubusercontent.com/Homebrew/homebrew-core/710e281d25b5f9b583f0e51ef33cca797c27c909/Formula/boost.rb
+            brew install ./boost.rb
+
+            brew install cmake
+
+            # z3
+            curl -O -L https://github.com/Z3Prover/z3/releases/download/Z3-4.8.5/z3-4.8.5-x64-osx-10.14.2.zip
+            unzip z3-4.8.5-x64-osx-10.14.2.zip
+            rm z3-4.8.5-x64-osx-10.14.2.zip
+            mv z3-4.8.5-x64-osx-10.14.2/bin/libz3.a /usr/local/lib
+            mv z3-4.8.5-x64-osx-10.14.2/bin/z3 /usr/local/bin
+            mv z3-4.8.5-x64-osx-10.14.2/include/* /usr/local/include
+            rm -r z3-4.8.5-x64-osx-10.14.2
+
+            # evmone
+            # TODO: evmone is only used since 0.5.11
+            curl -O -L https://github.com/ethereum/evmone/releases/download/v0.1.0/evmone-0.1.0-darwin-x86_64.tar.gz
+            tar xzpf evmone-0.1.0-darwin-x86_64.tar.gz -C /usr/local
+            rm evmone-0.1.0-darwin-x86_64.tar.gz
+
+            if [ -e scripts/install_obsolete_jsoncpp_1_7_4.sh ]; then
+              brew install wget
+              scripts/install_obsolete_jsoncpp_1_7_4.sh
+            else
+              brew install jsoncpp
+            fi
+          fi
+
+      - name: Prepare build directory and info
+        run: |
+          cd solidity/
+          mkdir -p build/
+
+          echo -n > prerelease.txt
+          # TMP:
+          #echo -n "$CIRCLE_SHA1" > commit_hash.txt
+
+      - name: Run CMake
+        run: |
+          cd solidity/build/
+          # NOTE: Solidity 0.6.0 has some unused variables and does not compile with -Werror on clang.
+          # FIXME: Find a better workaround than -w (which completely disables warnings).
+          cmake .. -DSTATIC_LINKING=1 -DSOLC_LINK_STATIC=1 -DCMAKE_BUILD_TYPE=Release -G "Unix Makefiles"
+
+      - name: Run make
+        run: |
+          cd solidity/build/
+          make -j 2 solc soltest
+          # Used in tests on 0.5.10
+          make -j 2 solfuzzer
+
+      - name: Upload solc as an artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: solc-macosx-amd64-${{ env.FULL_VERSION }}
+          path: solidity/build/solc/solc
+
+      - name: Inspect the binary
+        run: |
+          cd solidity/build/solc/
+          otool -L solc
+
+      - name: Run tests
+        run: |
+          cd solidity/
+          # Prevent the tests printing "tput: No value for $TERM and no -T specified" at every step (0.5.10)
+          export TERM=dumb
+          scripts/tests.sh
