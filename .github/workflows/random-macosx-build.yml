@@ -84,7 +84,7 @@ jobs:
           echo "BINARY_NAME=${binary_name}" >> $GITHUB_ENV
           echo "FULL_VERSION=${full_version}" >> $GITHUB_ENV
 
-      - name: Check reported version
+      - name: Verify reported version
         if: "env.BINARY_NAME"
         run: |
           cd solc-bin/macosx-amd64/
@@ -98,7 +98,7 @@ jobs:
           reusing=$(test "$version_output" = "$expected_version_output" && echo true || echo false)
           echo "REUSING_EXISTING_BINARY=${reusing}" >> $GITHUB_ENV
 
-      - name: Check reported version
+      - name: Move, commit and push the reused binary
         if: "env.BINARY_NAME && env.REUSING_EXISTING_BINARY == 'true'"
         run: |
           cd solc-bin/macosx-amd64/
