@@ -284,6 +284,18 @@ jobs:
           )
           test -z "$extra_dynamic_libraries"
 
+      - name: Verify reported version
+        run: |
+          cd solidity/build/solc/
+
+          version_output=$(solc --version)
+          expected_version_output="$(printf "solc, the solidity compiler commandline interface\nVersion: ${FULL_BUILD_VERSION}.Darwin.appleclang")"
+
+          echo "Reported version:"
+          echo "$version_output"
+
+          test "$version_output" = "$expected_version_output"
+
       - name: Run tests
         run: |
           cd solidity/
