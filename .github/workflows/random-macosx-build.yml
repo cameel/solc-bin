@@ -2,8 +2,12 @@ name: MacOS build of a random missing solc version
 
 on:
   push:
-    # Action disabled. The filter excludes all the possible branch names.
-    branches: ["!*"]
+    branches:
+      - gh-pages
+
+  schedule:
+    # Run every hour
+    - cron: '0 * * * *'
 
 env:
   MIN_SUPPORTED_SOLIDITY_VERSION: 0.3.6
