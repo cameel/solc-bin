@@ -55,16 +55,73 @@ jobs:
 
           echo "SOLIDITY_VERSION=${selected_version}" >> $GITHUB_ENV
 
-  build:
+  try-reuse-existing-binary:
     runs-on: macos-10.15
     needs:
       - select-solc-version
     env:
       SOLIDITY_VERSION: ${{ needs.select-solc-version.outputs.solidity-version }}
+      REUSING_EXISTING_BINARY: "false"
+    outputs:
+      reusing-existing-binary: ${{ env.REUSING_EXISTING_BINARY }}
+
+    if: "needs.select-solc-version.outputs.solidity-version"
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          path: 'solc-bin'
+
+      - name: Find the binary
+        run: |
+          cd solc-bin/macosx-amd64/retired-rebuilds-with-version-discrepancy/
+
+          binary_name=$(ls -1 "solc-macosx-amd64-v${SOLIDITY_VERSION}+commit."*)
+
+          echo "Selected binary: ${binary_name}"
+          test -f "$binary_name"
+
+          echo "BINARY_NAME=${binary_name}" >> $GITHUB_ENV
+          echo "FULL_VERSION=${full_version}" >> $GITHUB_ENV
+
+      - name: Check reported version
+        if: "env.BINARY_NAME"
+        run: |
+          cd solc-bin/macosx-amd64/
+
+          version_output=$("retired-rebuilds-with-version-discrepancy/$BINARY_NAME" --version)
+          expected_version_output="$(printf "solc, the solidity compiler commandline interface\nVersion: ${FULL_VERSION}.Darwin.appleclang")"
+
+          echo "Reported version:"
+          echo "$version_output"
+
+          reusing=$(test "$version_output" = "$expected_version_output" && echo true || echo false)
+          echo "REUSING_EXISTING_BINARY=${reusing}" >> $GITHUB_ENV
+
+      - name: Check reported version
+        if: "env.BINARY_NAME && env.REUSING_EXISTING_BINARY == 'true'"
+        run: |
+          cd solc-bin/macosx-amd64/
+
+          git config --local user.name "$COMMITTER_NAME"
+          git config --local user.email "$COMMITTER_EMAIL"
+
+          mv "retired-rebuilds-with-version-discrepancy/${BINARY_NAME}" ..
+          git add --verbose "${BINARY_NAME}" "retired-rebuilds-with-version-discrepancy/${BINARY_NAME}"
+          git commit --message "Accepted MacOS build ${{ env.FULL_VERSION }} reporting correct version"
+          git push origin HEAD
+
+  build:
+    runs-on: macos-10.15
+    needs:
+      - select-solc-version
+      - try-reuse-existing-binary
+    env:
+      SOLIDITY_VERSION: ${{ needs.select-solc-version.outputs.solidity-version }}
     outputs:
       full-build-version: ${{ env.FULL_BUILD_VERSION }}
 
-    if: "needs.select-solc-version.outputs.solidity-version"
+    if: "needs.select-solc-version.outputs.solidity-version && needs.try-reuse-existing-binary.outputs.reusing-existing-binary"
     steps:
       - name: Check out Solidity source
         uses: actions/checkout@v2
@@ -284,12 +341,13 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - select-solc-version
+      - try-reuse-existing-binary
       - build
     env:
       SOLIDITY_VERSION: ${{ needs.select-solc-version.outputs.solidity-version }}
       FULL_BUILD_VERSION: ${{ needs.build.outputs.full-build-version }}
 
-    if: "needs.select-solc-version.outputs.solidity-version"
+    if: "needs.select-solc-version.outputs.solidity-version && needs.try-reuse-existing-binary.outputs.reusing-existing-binary"
     steps:
       - uses: actions/checkout@v2
         with:
