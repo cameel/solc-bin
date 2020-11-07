@@ -11,7 +11,7 @@ on:
 
 env:
   MIN_SUPPORTED_SOLIDITY_VERSION: 0.3.6
-  TARGET_BRANCH: macosx-static-binaries-with-bytecode-comparison
+  TARGET_BRANCH: macosx-rebuild-with-bytecode-comparison
   COMMITTER_NAME: macosx build action
   COMMITTER_EMAIL: builds@ethereum.org
 
