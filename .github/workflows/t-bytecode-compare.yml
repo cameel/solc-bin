@@ -1,0 +1,168 @@
+name: Release bytecode
+
+on: pull_request
+
+jobs:
+   generate:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        include:
+          - platform: emscripten-wasm32
+            os: ubuntu-latest
+
+          - platform: emscripten-asmjs
+            os: ubuntu-latest
+
+          - platform: linux-amd64
+            os: ubuntu-latest
+
+          - platform: macosx-amd64
+            os: macos-latest
+
+          # TODO: Run checks on Windows binaries too
+
+    env:
+      PLATFORM: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          repository: 'ethereum/solidity'
+          path: 'solidity/'
+          fetch-depth: 0
+
+      - uses: actions/checkout@v2
+        with:
+          repository: 'ethereum/solc-js'
+          path: 'solc-js/'
+
+      - uses: actions/checkout@v2
+        with:
+          ref: ${{ env.GITHUB_REF }}
+          path: 'solc-bin/'
+          # We need more than just a single revision to be able to use diff
+          fetch-depth: 0
+
+      - name: Install dependencies of solc-js
+        run: |
+          cd solc-js/
+          npm install
+
+      - name: Use bytecode comparison scripts from latest Solidity version
+        run: |
+          mkdir scripts/
+          cp solidity/scripts/isolate_tests.py scripts/
+          cp solidity/scripts/bytecodecompare/prepare_report.py scripts/
+          cp solidity/scripts/bytecodecompare/prepare_report.js scripts/
+
+      - name: Generate reports from matching release binaries
+        run: |
+          base_dir="$PWD"
+
+          mkdir reports/
+          mkdir bytecode/
+
+          cd "solc-bin/${PLATFORM}/"
+          echo "PR commit range: origin/${{ github.base_ref }}..${GITHUB_REF}"
+
+          modified_release_versions=$(
+            git diff --name-only "origin/${{ github.base_ref }}" |
+            sed -n -E 's/^[^\/]+\/(solc|soljson)-[0-9a-zA-Z-]+-v([0-9.]+)\+commit\.[0-9a-f]+(.[^.]+)?$/\2/p' |
+            sort -V |
+            uniq
+          )
+          echo "Release versions modified in the PR:"
+          echo "$modified_release_versions"
+
+          platform_binaries="$(git ls-files "solc-${PLATFORM}-v*+commit.*" | sort -V)"
+          cd "${base_dir}"
+
+          for binary_name in $platform_binaries; do
+            solidity_version=$(echo "$binary_name" | sed -n -E 's/^(solc|soljson)-'${PLATFORM}'-v([0-9.]+)\+commit.+$/\2/p')
+
+            if echo "$modified_release_versions" | grep -x "$solidity_version"; then
+              echo "Binary ${binary_name} (version ${solidity_version}) matches one of the modified versions."
+
+              cd solidity/
+              # While bytecode scripts come from the latest compiler, the test files should come from
+              # the Solidity version we're running them against to avoid errors due to breaking syntax changes.
+              git checkout "v${solidity_version}"
+              cd "${base_dir}"
+
+              mkdir "bytecode/${binary_name}/"
+              cd "bytecode/${binary_name}/"
+              "${base_dir}/scripts/isolate_tests.py" "${base_dir}/solidity/test/"
+
+              if [[ $PLATFORM == emscripten-wasm32 ]] || [[ $PLATFORM == emscripten-asmjs ]]; then
+                ln -sf "${base_dir}/solc-bin/${PLATFORM}/${binary_name}" "${base_dir}/solc-js/soljson.js"
+                ln -s "${base_dir}/solc-js/" solc-js
+                cp "${base_dir}/scripts/prepare_report.js" prepare_report.js
+
+                ./prepare_report.js --strip-smt-pragmas *.sol > "${base_dir}/reports/report-${binary_name}.txt"
+              else
+                yul_optimizer_flags=()
+                if [[ $solidity_version == 0.6.0 ]] || [[ $solidity_version == 0.6.1 ]]; then
+                  yul_optimizer_flags+=(--force-no-optimize-yul)
+                fi
+
+                "${base_dir}/scripts/prepare_report.py" "${base_dir}/solc-bin/${PLATFORM}/$binary_name" \
+                  --interface cli \
+                  --smt-use strip-pragmas \
+                  --report-file "${base_dir}/reports/report-${binary_name}.txt" \
+                  "${yul_optimizer_flags[@]}"
+              fi
+
+              cd "${base_dir}"
+            else
+              echo "Binary ${binary_name} (version ${solidity_version}) does not match any modified version. Skipping."
+            fi
+          done
+
+      - name: Upload reports
+        uses: actions/upload-artifact@v2
+        with:
+          name: ${{ matrix.platform }}
+          path: reports/*
+
+   compare:
+    runs-on: ubuntu-latest
+    needs: generate
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v2
+        with:
+          path: reports/
+
+      - name: Compare
+        run: |
+          # Exit without errors if there were no binaries to check
+          [[ -d reports/ ]] || exit 0
+
+          report_files="$(find reports/ -type f)"
+          echo "Available reports:"
+          echo "$report_files"
+
+          versions_in_report_names=$(
+            echo "$report_files" |
+            sed -n -E 's/^reports\/[^\/]+\/report-(solc|soljson)-[0-9a-zA-Z-]+-v([0-9.]+\+commit\.[0-9a-f]+)(.[^.]+)?\.txt$/\2/p' |
+            sort -V |
+            uniq
+          )
+
+          num_failed_comparisons=0
+          for solidity_version_and_commit in $versions_in_report_names; do
+            echo "Comparing reports for Solidity ${solidity_version_and_commit}:"
+            report_files_for_version=$(
+              echo "$report_files" |
+              sed -n -E '/^reports\/[^\/]+\/report-(solc|soljson)-[0-9a-zA-Z-]+-v'${solidity_version_and_commit//\+/\\+}'+(.[^.]+)?\.txt$/p'
+            )
+            echo "$report_files_for_version"
+
+            diff --report-identical-files --brief --from-file $report_files_for_version || ((++num_failed_comparisons))
+            echo
+          done
+
+          (( num_failed_comparisons == 0 )) || { echo "Found bytecode differences in ${num_failed_comparisons} versions"; exit 1; }
